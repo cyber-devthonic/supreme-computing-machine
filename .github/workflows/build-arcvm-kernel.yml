@@ -45,7 +45,7 @@ on:
         default: 'ARCVM-KSU-SUSFS'
 
 env:
-  git_tag: chromeos-5.4-arcvm
+  git_tag: chromeos-5.10-arcvm
 
 jobs:
   build:
