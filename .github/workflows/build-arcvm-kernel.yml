@@ -444,7 +444,7 @@ jobs:
           endmenu
           EOF
 
-      - name: Add Kernel Configuration Options
+      - name: Add Kernel Configuration Options 
         working-directory: kernel
         run: |
           echo "[+] Adding comprehensive kernel configuration options"
@@ -505,7 +505,68 @@ jobs:
             echo "CONFIG_ZRAM_DEF_COMP_LZ4KD=y" >> $CONFIG_FILE
           fi
 
-      - name: Configure Kernel Version
+      - name: Add Kernel Configuration Options arch/x86/configs/gki_defconfig
+        working-directory: kernel
+        run: |
+          echo "[+] Adding comprehensive kernel configuration options"
+          CONFIG_FILE="arch/x86/configs/gki_defconfig"
+
+          # KernelSU base configs
+          echo "CONFIG_KSU=y" >> $CONFIG_FILE
+          echo "CONFIG_KSU_DEBUG=y" >> $CONFIG_FILE
+          echo "CONFIG_KSU_MULTI_MANAGER_SUPPORT=y" >> $CONFIG_FILE
+
+          # KPM for SukiSU
+          if [ "${{ inputs.use_kpm }}" == "true" ]; then
+            echo "CONFIG_KPM=y" >> $CONFIG_FILE
+            echo "CONFIG_KALLSYMS=y" >> $CONFIG_FILE
+            echo "CONFIG_KALLSYMS_ALL=y" >> $CONFIG_FILE
+          fi
+
+          # SUSFS configs (all enabled as specified)
+          echo "CONFIG_KSU_SUSFS=y" >> $CONFIG_FILE
+          echo "CONFIG_KSU_SUSFS_SUS_MAP=y" >> $CONFIG_FILE
+          echo "CONFIG_KSU_SUSFS_SUS_PATH=y" >> $CONFIG_FILE
+          echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y" >> $CONFIG_FILE
+          echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y" >> $CONFIG_FILE
+          echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y" >> $CONFIG_FILE
+          echo "CONFIG_KSU_SUSFS_SUS_KSTAT=y" >> $CONFIG_FILE
+          echo "CONFIG_KSU_SUSFS_TRY_UMOUNT=y" >> $CONFIG_FILE
+          echo "CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=y" >> $CONFIG_FILE
+          echo "CONFIG_KSU_SUSFS_SPOOF_UNAME=y" >> $CONFIG_FILE
+          echo "CONFIG_KSU_SUSFS_ENABLE_LOG=y" >> $CONFIG_FILE
+          echo "CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y" >> $CONFIG_FILE
+          echo "CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y" >> $CONFIG_FILE
+
+          # TMPFS extended attributes
+          echo "CONFIG_TMPFS_XATTR=y" >> $CONFIG_FILE
+          echo "CONFIG_TMPFS_POSIX_ACL=y" >> $CONFIG_FILE
+
+          # Network configs
+          echo "CONFIG_IP_NF_TARGET_TTL=y" >> $CONFIG_FILE
+          echo "CONFIG_IP6_NF_TARGET_HL=y" >> $CONFIG_FILE
+          echo "CONFIG_IP6_NF_MATCH_HL=y" >> $CONFIG_FILE
+
+          # BBR congestion control
+          echo "CONFIG_TCP_CONG_ADVANCED=y" >> $CONFIG_FILE
+          echo "CONFIG_TCP_CONG_BBR=y" >> $CONFIG_FILE
+          echo "CONFIG_NET_SCH_FQ=y" >> $CONFIG_FILE
+
+          # ZRAM configs
+          if [ "${{ inputs.use_zram }}" == "true" ]; then
+            echo "CONFIG_ZSMALLOC=y" >> $CONFIG_FILE
+            echo "CONFIG_ZRAM=y" >> $CONFIG_FILE
+            echo "CONFIG_CRYPTO_LZO=y" >> $CONFIG_FILE
+            echo "CONFIG_CRYPTO_LZ4HC=y" >> $CONFIG_FILE
+            echo "CONFIG_CRYPTO_LZ4K=y" >> $CONFIG_FILE
+            echo "CONFIG_CRYPTO_LZ4KD=y" >> $CONFIG_FILE
+            echo "CONFIG_CRYPTO_842=y" >> $CONFIG_FILE
+            echo "CONFIG_CRYPTO_LZ4K_OPLUS=y" >> $CONFIG_FILE
+            echo "CONFIG_ZRAM_WRITEBACK=y" >> $CONFIG_FILE
+            echo "CONFIG_ZRAM_DEF_COMP_LZ4KD=y" >> $CONFIG_FILE
+          fi
+
+      - name: Configure Kernel Version 
         working-directory: kernel
         run: |
           # Apply custom version suffix (default: ARCVM-KSU-SUSFS)
@@ -518,16 +579,20 @@ jobs:
         run: |
           echo "[+] Building ARCVM kernel with KernelSU+SUSFS"
 
-          # Source ARCVM build config
-          set -a && . build.config.gki.x86_64; set +a
-          export DEFCONFIG=x86_64_arcvm_defconfig
-
-          # Build with ccache for speed - disable Werror for KPM build issues
+          # Use working ARCVM build approach (simplified flags)
           export KBUILD_CFLAGS="-Wno-unused-result"
-          make CC="ccache clang" LLVM=1 LLVM_IAS=1 DEPMOD=depmod DTC=dtc O=${PWD} mrproper
-          make CC="ccache clang" LLVM=1 LLVM_IAS=1 DEPMOD=depmod DTC=dtc O=${PWD} ${DEFCONFIG} < /dev/null
-          scripts/config --file .config -e LTO_CLANG -d LTO_NONE -e LTO_CLANG_THIN -d LTO_CLANG_FULL -e THINLTO
-          make CC="ccache clang" LLVM=1 LLVM_IAS=1 DEPMOD=depmod DTC=dtc O=${PWD} -j$(nproc) bzImage modules prepare-objtool
+
+          echo "[+] Cleaning build environment"
+          make CC="ccache clang" LLVM=1 LLVM_IAS=1 O=${PWD} mrproper
+
+          echo "[+] Applying defconfig"
+          make CC="ccache clang" LLVM=1 LLVM_IAS=1 O=${PWD} x86_64_arcvm_defconfig
+
+          echo "[+] Enabling additional build features"
+          scripts/config --file .config -e LTO_CLANG_THIN -e THINLTO
+
+          echo "[+] Building bzImage"
+          make CC="ccache clang" LLVM=1 LLVM_IAS=1 O=${PWD} -j$(nproc) bzImage
 
           ls -l -h arch/x86/boot/
           echo "file_path=${PWD}/arch/x86/boot/bzImage" >> $GITHUB_ENV
