@@ -156,14 +156,19 @@ jobs:
           grep -q "kernelsu" "$DRIVER_KCONFIG" || sed -i "/endmenu/i\\source \"drivers/kernelsu/Kconfig\"" "$DRIVER_KCONFIG"
 
           echo "[+] Apply KernelSU patches"
-          cd $KERNEL_ROOT && git apply $GITHUB_WORKSPACE/KernelSU/.github/patches/5.10/*.patch || echo "[-] No patch found"
+          PATCH_DIR="$GITHUB_WORKSPACE/KernelSU/.github/patches/5.10"
+          if [ -d "$PATCH_DIR" ] && [ "$(ls -A $PATCH_DIR/*.patch 2>/dev/null)" ]; then
+            cd $KERNEL_ROOT && find $PATCH_DIR -name "*.patch" -exec git apply {} \; 2>/dev/null || echo "[-] Some patches failed to apply"
+          else
+            echo "[-] No KernelSU patches found, skipping"
+          fi
 
           echo "[+] Patch script/setlocalversion"
           sed -i 's/-dirty//g' $KERNEL_ROOT/scripts/setlocalversion
 
           echo "[+] KernelSU setup done."
           cd $GITHUB_WORKSPACE/KernelSU
-          KSU_VERSION=$(($(git rev-list --count HEAD) + 10200))
+          KSU_VERSION=$(($(git rev-list --count HEAD) + 22000))
           echo "KernelSU version: $KSU_VERSION"
           echo "kernelsu_version=$KSU_VERSION" >> $GITHUB_ENV
 
@@ -202,14 +207,19 @@ jobs:
 
           # Apply KernelSU patches
           echo "[+] Applying KernelSU patches for ChromeOS 5.10"
-          cd $KERNEL_ROOT && git apply $GITHUB_WORKSPACE/KernelSU/.github/patches/5.10/*.patch || echo "[-] No patch found"
+          PATCH_DIR="$GITHUB_WORKSPACE/KernelSU/.github/patches/5.10"
+          if [ -d "$PATCH_DIR" ] && [ "$(ls -A $PATCH_DIR/*.patch 2>/dev/null)" ]; then
+            cd $KERNEL_ROOT && find $PATCH_DIR -name "*.patch" -exec git apply {} \; 2>/dev/null || echo "[-] Some patches failed to apply"
+          else
+            echo "[-] No KernelSU patches found, skipping"
+          fi
 
           # Remove dirty tag
           sed -i 's/-dirty//g' scripts/setlocalversion
 
           # Get KSU version
           cd $GITHUB_WORKSPACE/KernelSU
-          KSU_VERSION=$(($(git rev-list --count HEAD) + 10200))
+          KSU_VERSION=$(($(git rev-list --count HEAD) + 22000))
           echo "KernelSU version: $KSU_VERSION"
           echo "kernelsu_version=$KSU_VERSION" >> $GITHUB_ENV
 
@@ -512,7 +522,8 @@ jobs:
           set -a && . build.config.gki.x86_64; set +a
           export DEFCONFIG=x86_64_arcvm_defconfig
 
-          # Build with ccache for speed
+          # Build with ccache for speed - disable Werror for KPM build issues
+          export KBUILD_CFLAGS="-Wno-unused-result"
           make CC="ccache clang" LLVM=1 LLVM_IAS=1 DEPMOD=depmod DTC=dtc O=${PWD} mrproper
           make CC="ccache clang" LLVM=1 LLVM_IAS=1 DEPMOD=depmod DTC=dtc O=${PWD} ${DEFCONFIG} < /dev/null
           scripts/config --file .config -e LTO_CLANG -d LTO_NONE -e LTO_CLANG_THIN -d LTO_CLANG_FULL -e THINLTO
