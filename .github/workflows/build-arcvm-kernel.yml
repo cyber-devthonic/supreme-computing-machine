@@ -566,13 +566,20 @@ jobs:
             echo "CONFIG_ZRAM_DEF_COMP_LZ4KD=y" >> $CONFIG_FILE
           fi
 
-      - name: Configure Kernel Version 
+      - name: Configure Kernel Version
         working-directory: kernel
         run: |
           # Apply custom version suffix (default: ARCVM-KSU-SUSFS)
           echo "Using custom version suffix: ${{ inputs.custom_version }}"
           sed -i "s/^EXTRAVERSION.*/EXTRAVERSION = -${{ inputs.custom_version }}/" Makefile
           sed -i 's/-dirty//' scripts/setlocalversion
+
+      - name: Upload Modified Kernel Source (Debug)
+        uses: actions/upload-artifact@v5
+        with:
+          name: Modified-Kernel-Source-${{ env.version }}-Debug
+          path: kernel/
+          if-no-files-found: error
 
       - name: Build Kernel
         working-directory: kernel
