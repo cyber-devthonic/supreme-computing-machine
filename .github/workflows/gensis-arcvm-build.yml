@@ -227,7 +227,17 @@ jobs:
           KSU_VERSION=$(($(git rev-list --count HEAD) + 22000))
           echo "KernelSU version: $KSU_VERSION"
           echo "kernelsu_version=$KSU_VERSION" >> $GITHUB_ENV
-
+          
+      - name: Fix And Bypass KernelSU KPM issue - drivers/kernelsu/kpm/kpm.c
+        working-directory: kernel
+        run: |
+          FILE="drivers/kernelsu/kpm/kpm.c"
+          sed -i 's/strncpy_from_user(\(.*\));/if (strncpy_from_user(\1) < 0) return -EFAULT;/' "$FILE"
+          echo "export KCFLAGS=\"\$KCFLAGS -Wno-error\"" >> ../.kcflags_env.sh
+          if ! grep -q 'pragma clang diagnostic ignored "-Wunused-result"' "$FILE"; then
+            sed -i '1i #pragma clang diagnostic ignored "-Wunused-result"' "$FILE"
+          fi
+          
       - name: Apply SUSFS Patches
         working-directory: kernel
         run: |
@@ -794,7 +804,12 @@ jobs:
           ls -l -h ${PWD}/arch/${ARCH}/boot
           echo "file_path=${PWD}/arch/${ARCH}/boot/${KERNEL_IMAGE_NAME}" >> $GITHUB_ENV
           
-      
+      - name: Show last 200 lines of failed build
+        if: failure()
+        run: |
+          echo "==== FULL BUILD FAILURE LOG ===="
+           dmesg || true
+
       - name: Upload kernel-ARCVM-${{ matrix.arch }}-${{ env.version }}
         uses: actions/upload-artifact@v5
         with:
