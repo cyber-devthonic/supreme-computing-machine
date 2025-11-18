@@ -120,7 +120,7 @@ jobs:
       
       - name: Install Latest ChromeOS-Compatible LLVM Toolchain (LLVM 18)
         run: |
-          export LLVM_VERSION=18
+          export LLVM_VERSION=14
 
           echo "🔧 Installing official LLVM $LLVM_VERSION packages..."
           wget https://apt.llvm.org/llvm.sh
