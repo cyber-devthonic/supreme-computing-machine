@@ -298,8 +298,9 @@ jobs:
           echo "[+] Configuring custom Arch x86_64 KernelSU + SukiSU + SUSFS Kconfig"
           KCONFIG_FILE=$GITHUB_WORKSPACE/kernel/arch/x86/Kconfig
 
-          # Create the custom Arch x86_64 KernelSU + SukiSU + SUSFS Kconfig with the specified structure
-          cat > "$KCONFIG_FILE" << 'EOF'
+          # Add the KernelSU + SUSFS configuration to the existing x86 Kconfig
+          echo '
+
           # --- KernelSU/SUSFS Configuration ---
           menu "KernelSU and SUSFS Support"
 
@@ -476,8 +477,7 @@ jobs:
           endif # KSU
 
           endmenu
-          # --- End KernelSU/SUSFS Configuration ---
-          EOF
+          # --- End KernelSU/SUSFS Configuration ---' >> "$KCONFIG_FILE"
           
       - name: Configure Custom KernelSU Kconfig
         working-directory: kernel
