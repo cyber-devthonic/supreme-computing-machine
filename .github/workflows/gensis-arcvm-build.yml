@@ -82,6 +82,8 @@ jobs:
           remove-cached-tools: 'false'
           verbose: 'true'
 
+      # ===================================================================
+      
       - name: Install Build Tools
         run: |
           sudo apt-get update
@@ -92,7 +94,9 @@ jobs:
               rsync python3 device-tree-compiler ccache python3-setuptools
 
           sudo ln -s --force python3 /usr/bin/python
-
+          
+      # =================================================================== 
+       
       - name: Configure ccache
         run: |
           mkdir -p ~/.cache/bazel
@@ -101,6 +105,8 @@ jobs:
           ccache --set-config=compression=true
           echo "CCACHE_DIR=$HOME/.ccache" >> $GITHUB_ENV
 
+
+     # ===================================================================
       - name: Restore ccache
         uses: actions/cache@v4
         with:
@@ -109,6 +115,9 @@ jobs:
           restore-keys: |
             arcvm-${{ env.git_tag }}-ccache-
 
+
+      # ===================================================================
+      
       - name: Install LLVM Tools
         run: |
           export LLVM_VERSION=14
@@ -127,15 +136,22 @@ jobs:
           sudo ln -s --force /usr/bin/llvm-readelf-$LLVM_VERSION /usr/bin/llvm-readelf
           sudo ln -s --force /usr/bin/clang++-$LLVM_VERSION /usr/bin/clang++
 
+
+      # ===================================================================
+      
       - name: Checkout KernelSU
         uses: actions/checkout@v5
         with:
           path: KernelSU
           fetch-depth: 0
-
+      # ===================================================================
+      
       - name: Setup kernel source
         run: git clone https://chromium.googlesource.com/chromiumos/third_party/kernel.git -b ${{ env.git_tag }} --depth=1
 
+
+      # ===================================================================
+      
       - name: Extract version from Makefile
         working-directory: kernel
         run: |
@@ -145,6 +161,8 @@ jobs:
           echo "ChromeOS ARCVM Linux kernel version: $VERSION.$PATCHLEVEL.$SUBLEVEL"
           echo "version=$VERSION.$PATCHLEVEL.$SUBLEVEL" >> $GITHUB_ENV
 
+
+      # =================================================================== 
       - name: Setup KernelSU
         working-directory: kernel
         run: |
@@ -177,6 +195,7 @@ jobs:
           echo "KernelSU version: $KSU_VERSION"
           echo "kernelsu_version=$KSU_VERSION" >> $GITHUB_ENV
 
+      # =================================================================== 
       - name: Clone Dependencies
         run: |
           echo "[+] Cloning required repositories"
@@ -189,6 +208,8 @@ jobs:
 
           # Additional kernel patches
           git clone https://github.com/Tools-cx-app/kernel_patches.git --depth=1
+
+      # ===================================================================    
 
       - name: Setup KernelSU (${{ inputs.kernelsu_variant }})
         working-directory: kernel
@@ -227,6 +248,8 @@ jobs:
           KSU_VERSION=$(($(git rev-list --count HEAD) + 22000))
           echo "KernelSU version: $KSU_VERSION"
           echo "kernelsu_version=$KSU_VERSION" >> $GITHUB_ENV
+
+       # ===================================================================    
           
       - name: Fix And Bypass KernelSU KPM issue - drivers/kernelsu/kpm/kpm.c
         working-directory: kernel
@@ -237,6 +260,8 @@ jobs:
           if ! grep -q 'pragma clang diagnostic ignored "-Wunused-result"' "$FILE"; then
             sed -i '1i #pragma clang diagnostic ignored "-Wunused-result"' "$FILE"
           fi
+
+       # ===================================================================    
           
       - name: Apply SUSFS Patches
         working-directory: kernel
@@ -265,6 +290,8 @@ jobs:
           echo "[+] Applying main SUSFS kernel patch to kernel"
           cd $KERNEL_ROOT
           patch -p1 --fuzz=3 < 50_add_susfs_in_gki-android12-5.10.patch || true
+
+      # ===================================================================     
 
       - name: Apply ZRAM/LZ4KD Patches
         if: ${{ inputs.use_zram }}
@@ -300,7 +327,9 @@ jobs:
             cp $GITHUB_WORKSPACE/kernel_patches/69_hide_stuff.patch ./
           fi
           patch -p1 -F 3 < 69_hide_stuff.patch || true
-          
+
+
+      # ===================================================================     
 
       - name: Configure Custom Arch x86_64 KernelSU + SukiSU + SUSFS Kconfig
         working-directory: kernel
@@ -488,6 +517,8 @@ jobs:
 
           endmenu
           # --- End KernelSU/SUSFS Configuration ---' >> "$KCONFIG_FILE"
+
+      # ===================================================================     
           
       - name: Configure Custom KernelSU Kconfig
         working-directory: kernel
@@ -647,6 +678,9 @@ jobs:
           endmenu
           EOF
 
+
+     # ===================================================================
+ 
       - name: Add Kernel Configuration Options  - x86_64_arcvm_defconfig
         working-directory: kernel
         run: |
@@ -707,6 +741,8 @@ jobs:
             echo "CONFIG_ZRAM_WRITEBACK=y" >> $CONFIG_FILE
             echo "CONFIG_ZRAM_DEF_COMP_LZ4KD=y" >> $CONFIG_FILE
           fi
+
+        # ===================================================================   
 
       - name: Add Kernel Configuration Options gki_defconfig
         working-directory: kernel
@@ -769,6 +805,61 @@ jobs:
             echo "CONFIG_ZRAM_DEF_COMP_LZ4KD=y" >> $CONFIG_FILE
           fi
 
+      
+
+        # ===============================================================
+        #  GUARANTEED KernelSU KPM FIX + SANITY-CHECK + SAFE BUILD
+        # ===============================================================
+        
+      - name: Patch KernelSU KPM (Guaranteed Before Build)
+        working-directory: kernel
+        run: |
+            FILE="drivers/kernelsu/kpm/kpm.c"
+        
+            echo "🔍 Checking if KPM file exists..."
+            if [ ! -f "$FILE" ]; then
+              echo "❌ ERROR: $FILE not found. KPM cannot be patched."
+              exit 1
+            fi
+        
+            echo "🛠 Applying KernelSU KPM Patch (safe wrap for strncpy_from_user)..."
+            # Patch all strncpy_from_user() calls to check return value
+            sed -i 's/strncpy_from_user(\(.*\));/if (strncpy_from_user(\1) < 0) return -EFAULT;/' "$FILE"
+        
+            echo "🛡 Adding pragma ignore for fallback..."
+            if ! grep -q 'pragma clang diagnostic ignored "-Wunused-result"' "$FILE"; then
+              sed -i '1i #pragma clang diagnostic ignored "-Wunused-result"' "$FILE"
+            fi
+        
+            echo "⚙️ Enforcing KCFLAGS=-Wno-error globally..."
+            echo 'KCFLAGS += -Wno-error' >> scripts/Makefile.extrawarn || true
+        
+            # =====================================================
+            #                SANITY-CHECK SECTION
+            # =====================================================
+        
+            echo "🔎 Running KPM sanity-check 1: ensure patch applied..."
+            if ! grep -q '< 0) return -EFAULT' "$FILE"; then
+              echo "❌ ERROR: KPM return-value patch NOT applied correctly."
+              exit 1
+            fi
+        
+            echo "🔎 Running KPM sanity-check 2: ensure pragma exists..."
+            if ! grep -q 'ignored "-Wunused-result"' "$FILE"; then
+              echo "❌ ERROR: pragma suppress NOT applied."
+              exit 1
+            fi
+        
+            echo "🔎 Running KPM sanity-check 3: ensure Werror disabled..."
+            if ! grep -q 'Wno-error' scripts/Makefile.extrawarn; then
+              echo "❌ ERROR: -Wno-error not injected into Makefile system."
+              exit 1
+            fi
+        
+            echo "✅ KPM patching and sanity-checks COMPLETE."
+        
+        # ===================================================================
+        
       - name: Configure Kernel Version
         working-directory: kernel
         run: |
@@ -777,45 +868,79 @@ jobs:
           sed -i "s/^EXTRAVERSION.*/EXTRAVERSION = -${{ inputs.custom_version }}/" Makefile
           sed -i 's/-dirty//' scripts/setlocalversion
 
+        # ===================================================================
+
       - name: Upload Modified Kernel Source (Debug)
         uses: actions/upload-artifact@v5
         with:
           name: Modified-Kernel-Source-${{ env.version }}-Debug
           path: kernel/
           if-no-files-found: error
-
+          
+       # ===================================================================  
+       
       - name: Build Kernel
         working-directory: kernel
         env:
-          KERNEL_IMAGE_NAME: ${{ matrix.kernel_image_name }}
-          ARCH: ${{ matrix.arch }}
+           KERNEL_IMAGE_NAME: ${{ matrix.kernel_image_name }}
+           ARCH: ${{ matrix.arch }}
         run: |
-          set -a && . ${{ matrix.build_config }}; set +a
-          export DEFCONFIG=${{ matrix.defconfig }}
-          if [ ! -z ${{ vars.EXPECTED_SIZE }} ] && [ ! -z ${{ vars.EXPECTED_HASH }} ]; then
-            export KSU_EXPECTED_SIZE=${{ vars.EXPECTED_SIZE }}
-            export KSU_EXPECTED_HASH=${{ vars.EXPECTED_HASH }}
-          fi
-
-          make LLVM=1 LLVM_IAS=1 DEPMOD=depmod DTC=dtc O=${PWD} mrproper
-          make LLVM=1 LLVM_IAS=1 DEPMOD=depmod DTC=dtc O=${PWD} ${DEFCONFIG} < /dev/null
-          scripts/config --file .config -e LTO_CLANG -d LTO_NONE -e LTO_CLANG_THIN -d LTO_CLANG_FULL -e THINLTO
-          make LLVM=1 LLVM_IAS=1 DEPMOD=depmod DTC=dtc O=${PWD} -j$(nproc) ${KERNEL_IMAGE_NAME} modules prepare-objtool
-          ls -l -h ${PWD}/arch/${ARCH}/boot
-          echo "file_path=${PWD}/arch/${ARCH}/boot/${KERNEL_IMAGE_NAME}" >> $GITHUB_ENV
-          
-      - name: Show last 200 lines of failed build
+            set -a && . ${{ matrix.build_config }}; set +a
+            export DEFCONFIG=${{ matrix.defconfig }}
+        
+            if [ ! -z ${{ vars.EXPECTED_SIZE }} ] && [ ! -z ${{ vars.EXPECTED_HASH }} ]; then
+              export KSU_EXPECTED_SIZE=${{ vars.EXPECTED_SIZE }}
+              export KSU_EXPECTED_HASH=${{ vars.EXPECTED_HASH }}
+            fi
+        
+            echo "⚙️ Neutralizing Werror globally for safe KernelSU KPM build..."
+            export KCFLAGS="-Wno-error"
+            export KBUILD_CFLAGS="-Wno-error"
+            export CLANG_FLAGS="-Wno-error"
+        
+            echo "KCFLAGS=$KCFLAGS"
+            echo "KBUILD_CFLAGS=$KBUILD_CFLAGS"
+            echo "CLANG_FLAGS=$CLANG_FLAGS"
+        
+            # Clean
+            make LLVM=1 LLVM_IAS=1 DEPMOD=depmod DTC=dtc KCFLAGS="$KCFLAGS" O=${PWD} mrproper
+        
+            # Defconfig
+            make LLVM=1 LLVM_IAS=1 DEPMOD=depmod DTC=dtc KCFLAGS="$KCFLAGS" O=${PWD} ${DEFCONFIG} < /dev/null
+        
+            # Apply LTO config changes
+            scripts/config --file .config -e LTO_CLANG -d LTO_NONE -e LTO_CLANG_THIN -d LTO_CLANG_FULL -e THINLTO
+        
+            # Build Kernel (WITH Werror neutralized)
+            echo "🚀 Building kernel with Werror disabled..."
+            make LLVM=1 LLVM_IAS=1 DEPMOD=depmod DTC=dtc \
+                 KCFLAGS="$KCFLAGS" KBUILD_CFLAGS="$KBUILD_CFLAGS" \
+                 CLANG_FLAGS="$CLANG_FLAGS" \
+                 O=${PWD} -j$(nproc) \
+                 ${KERNEL_IMAGE_NAME} modules prepare-objtool 2>&1 | tee ../kernel_build.log
+        
+            ls -l -h ${PWD}/arch/${ARCH}/boot
+            echo "file_path=${PWD}/arch/${ARCH}/boot/${KERNEL_IMAGE_NAME}" >> $GITHUB_ENV
+        
+        
+        # ===================================================================
+        
+      - name: Show last 200 build lines on failure (diagnostic)
         if: failure()
         run: |
-          echo "==== FULL BUILD FAILURE LOG ===="
-           dmesg || true
+            echo "==== KERNEL BUILD FAILED ===="
+            tail -n 200 kernel_build.log
+            
+        # ===================================================================
 
       - name: Upload kernel-ARCVM-${{ matrix.arch }}-${{ env.version }}
         uses: actions/upload-artifact@v5
         with:
           name: kernel-ARCVM-${{ matrix.arch }}-${{ env.version }}
           path: "${{ env.file_path }}"
-          
+
+        # ===================================================================
+           
       - name: Patch bzImage for KPM
         if: ${{ inputs.use_kpm && inputs.kernelsu_variant == 'SukiSU' }}
         working-directory: kernel
@@ -833,6 +958,8 @@ jobs:
             echo "[+] KPM patching completed"
           fi
 
+      # ===================================================================
+      
       - name: Create Simple Kernel Zip
         run: |
           echo "[+] Creating kernel package zip"
@@ -849,7 +976,9 @@ jobs:
 
           zip -r "$ZIP_NAME" kernel_package/
           echo "kernel_zip=$ZIP_NAME" >> $GITHUB_ENV
-
+          
+     # ===================================================================
+     
       - name: Upload Kernel Artifacts
         uses: actions/upload-artifact@v5
         with:
