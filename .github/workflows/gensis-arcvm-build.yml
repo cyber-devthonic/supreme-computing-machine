@@ -888,7 +888,7 @@ jobs:
        # ===================================================================  
        
        # Build Kernel fixed avoid CC being polluted by flags
-      - name: Build Kernel 
+      - name: Build Kernel (fixed avoid CC being polluted by flags)
         working-directory: kernel
         env:
           KERNEL_IMAGE_NAME: ${{ matrix.kernel_image_name }}
@@ -906,7 +906,7 @@ jobs:
           echo "ENV CC: '$CC'"
           echo "ENV KCFLAGS: '$KCFLAGS'"
           echo "ENV KBUILD_CFLAGS: '$KBUILD_CFLAGS'"
-          echo "ENV CLANG_FLAGS: '$CLANG_FLAGS'"
+          echo "ENV KCPPFLAGS: '$KCPPFLAGS'"
 
           # -------------------------------
           # Ensure a clean compiler name (no appended flags)
@@ -929,14 +929,14 @@ jobs:
           echo "Using linker binary: $(which $LD) ($( $LD --version | head -n1 ))"
 
           # -------------------------------
-          # Do NOT export KCFLAGS/CLANG_FLAGS into the global env that could pollute CC.
-          # Pass flags directly on the make command line instead.
+          # Pass flags directly on the make command line
+          # Use KCPPFLAGS for preprocessor flags (affects both C and assembly)
           # -------------------------------
           MAKE_KCFLAGS="-Wno-error"
+          MAKE_KCPPFLAGS="-Wno-error"
           MAKE_KBUILD_CFLAGS="-Wno-error"
-          MAKE_CLANG_FLAGS="-Wno-error"
 
-          echo "Building with KCFLAGS='$MAKE_KCFLAGS', KBUILD_CFLAGS='$MAKE_KBUILD_CFLAGS', CLANG_FLAGS='$MAKE_CLANG_FLAGS'"
+          echo "Building with KCFLAGS='$MAKE_KCFLAGS', KCPPFLAGS='$MAKE_KCPPFLAGS', KBUILD_CFLAGS='$MAKE_KBUILD_CFLAGS'"
 
           # ==========================================================
           #  CLEAN (pass flags to make invocation; don't export them)
@@ -944,7 +944,7 @@ jobs:
           make LLVM=1 LLVM_IAS=1 \
               CC=$CC HOSTCC=$HOSTCC LD=$LD \
               AR=$AR NM=$NM OBJCOPY=$OBJCOPY OBJDUMP=$OBJDUMP STRIP=$STRIP \
-              KCFLAGS="$MAKE_KCFLAGS" KBUILD_CFLAGS="$MAKE_KBUILD_CFLAGS" CLANG_FLAGS="$MAKE_CLANG_FLAGS" \
+              KCFLAGS="$MAKE_KCFLAGS" KCPPFLAGS="$MAKE_KCPPFLAGS" KBUILD_CFLAGS="$MAKE_KBUILD_CFLAGS" \
               DEPMOD=depmod DTC=dtc \
               O=${PWD} mrproper
 
@@ -954,7 +954,7 @@ jobs:
           make LLVM=1 LLVM_IAS=1 \
               CC=$CC HOSTCC=$HOSTCC LD=$LD \
               AR=$AR NM=$NM OBJCOPY=$OBJCOPY OBJDUMP=$OBJDUMP STRIP=$STRIP \
-              KCFLAGS="$MAKE_KCFLAGS" KBUILD_CFLAGS="$MAKE_KBUILD_CFLAGS" CLANG_FLAGS="$MAKE_CLANG_FLAGS" \
+              KCFLAGS="$MAKE_KCFLAGS" KCPPFLAGS="$MAKE_KCPPFLAGS" KBUILD_CFLAGS="$MAKE_KBUILD_CFLAGS" \
               DEPMOD=depmod DTC=dtc \
               O=${PWD} ${DEFCONFIG} < /dev/null
 
@@ -969,7 +969,7 @@ jobs:
           make LLVM=1 LLVM_IAS=1 \
               CC=$CC HOSTCC=$HOSTCC LD=$LD \
               AR=$AR NM=$NM OBJCOPY=$OBJCOPY OBJDUMP=$OBJDUMP STRIP=$STRIP \
-              KCFLAGS="$MAKE_KCFLAGS" KBUILD_CFLAGS="$MAKE_KBUILD_CFLAGS" CLANG_FLAGS="$MAKE_CLANG_FLAGS" \
+              KCFLAGS="$MAKE_KCFLAGS" KCPPFLAGS="$MAKE_KCPPFLAGS" KBUILD_CFLAGS="$MAKE_KBUILD_CFLAGS" \
               DEPMOD=depmod DTC=dtc \
               O=${PWD} -j$(nproc) \
               ${KERNEL_IMAGE_NAME} modules prepare-objtool 2>&1 | tee ../kernel_build.log
