@@ -887,7 +887,8 @@ jobs:
           
        # ===================================================================  
        
-      - name: Build Kernel
+       # Build Kernel fixed avoid CC being polluted by flags
+      - name: Build Kernel 
         working-directory: kernel
         env:
           KERNEL_IMAGE_NAME: ${{ matrix.kernel_image_name }}
@@ -901,22 +902,22 @@ jobs:
             export KSU_EXPECTED_HASH=${{ vars.EXPECTED_HASH }}
           fi
 
-          echo "⚙️ Neutralizing Werror globally for safe KernelSU KPM build..."
-          export KCFLAGS="-Wno-error"
-          export KBUILD_CFLAGS="-Wno-error"
-          export CLANG_FLAGS="-Wno-error"
+          echo "==> DEBUG: show any pre-existing CC/CFLAGS in environment"
+          echo "ENV CC: '$CC'"
+          echo "ENV KCFLAGS: '$KCFLAGS'"
+          echo "ENV KBUILD_CFLAGS: '$KBUILD_CFLAGS'"
+          echo "ENV CLANG_FLAGS: '$CLANG_FLAGS'"
 
-          echo "KCFLAGS=$KCFLAGS"
-          echo "KBUILD_CFLAGS=$KBUILD_CFLAGS"
-          echo "CLANG_FLAGS=$CLANG_FLAGS"
-
-          # ==========================================================
-          #  LLVM 18 / Clang environment (ChromeOS ARCVM REQUIRED)
-          # ==========================================================
+          # -------------------------------
+          # Ensure a clean compiler name (no appended flags)
+          # -------------------------------
+          unset CC CXX HOSTCC HOSTCXX
           export CC=clang
           export CXX=clang++
           export HOSTCC=clang
           export HOSTCXX=clang++
+
+          # Export precise LLVM toolchain helpers (ensure these are the installed llvm-18 binaries)
           export AR=llvm-ar
           export NM=llvm-nm
           export OBJCOPY=llvm-objcopy
@@ -924,27 +925,36 @@ jobs:
           export STRIP=llvm-strip
           export LD=ld.lld
 
-          echo "Using LLVM toolchain:"
-          clang --version
-          ld.lld --version
+          echo "Using compiler binary: $(which $CC) ($( $CC --version | head -n1 ))"
+          echo "Using linker binary: $(which $LD) ($( $LD --version | head -n1 ))"
+
+          # -------------------------------
+          # Do NOT export KCFLAGS/CLANG_FLAGS into the global env that could pollute CC.
+          # Pass flags directly on the make command line instead.
+          # -------------------------------
+          MAKE_KCFLAGS="-Wno-error"
+          MAKE_KBUILD_CFLAGS="-Wno-error"
+          MAKE_CLANG_FLAGS="-Wno-error"
+
+          echo "Building with KCFLAGS='$MAKE_KCFLAGS', KBUILD_CFLAGS='$MAKE_KBUILD_CFLAGS', CLANG_FLAGS='$MAKE_CLANG_FLAGS'"
 
           # ==========================================================
-          #  CLEAN
+          #  CLEAN (pass flags to make invocation; don't export them)
           # ==========================================================
           make LLVM=1 LLVM_IAS=1 \
               CC=$CC HOSTCC=$HOSTCC LD=$LD \
               AR=$AR NM=$NM OBJCOPY=$OBJCOPY OBJDUMP=$OBJDUMP STRIP=$STRIP \
-              KCFLAGS="$KCFLAGS" \
+              KCFLAGS="$MAKE_KCFLAGS" KBUILD_CFLAGS="$MAKE_KBUILD_CFLAGS" CLANG_FLAGS="$MAKE_CLANG_FLAGS" \
               DEPMOD=depmod DTC=dtc \
               O=${PWD} mrproper
 
           # ==========================================================
-          #  DEFCONFIG
+          #  DEFCONFIG (same: pass flags inline)
           # ==========================================================
           make LLVM=1 LLVM_IAS=1 \
               CC=$CC HOSTCC=$HOSTCC LD=$LD \
               AR=$AR NM=$NM OBJCOPY=$OBJCOPY OBJDUMP=$OBJDUMP STRIP=$STRIP \
-              KCFLAGS="$KCFLAGS" \
+              KCFLAGS="$MAKE_KCFLAGS" KBUILD_CFLAGS="$MAKE_KBUILD_CFLAGS" CLANG_FLAGS="$MAKE_CLANG_FLAGS" \
               DEPMOD=depmod DTC=dtc \
               O=${PWD} ${DEFCONFIG} < /dev/null
 
@@ -952,19 +962,22 @@ jobs:
           scripts/config --file .config -e LTO_CLANG -d LTO_NONE -e LTO_CLANG_THIN -d LTO_CLANG_FULL -e THINLTO
 
           # ==========================================================
-          #  BUILD KERNEL (Werror disabled, full LLVM 18 toolchain)
+          #  BUILD KERNEL (Werror disabled, pass flags IN-LINE)
           # ==========================================================
-          echo "🚀 Building kernel with LLVM 18 and Werror disabled…"
+          echo "🚀 Building kernel with LLVM and Werror disabled…"
+
           make LLVM=1 LLVM_IAS=1 \
               CC=$CC HOSTCC=$HOSTCC LD=$LD \
               AR=$AR NM=$NM OBJCOPY=$OBJCOPY OBJDUMP=$OBJDUMP STRIP=$STRIP \
-              KCFLAGS="$KCFLAGS" KBUILD_CFLAGS="$KBUILD_CFLAGS" CLANG_FLAGS="$CLANG_FLAGS" \
+              KCFLAGS="$MAKE_KCFLAGS" KBUILD_CFLAGS="$MAKE_KBUILD_CFLAGS" CLANG_FLAGS="$MAKE_CLANG_FLAGS" \
               DEPMOD=depmod DTC=dtc \
               O=${PWD} -j$(nproc) \
               ${KERNEL_IMAGE_NAME} modules prepare-objtool 2>&1 | tee ../kernel_build.log
 
-          ls -l -h ${PWD}/arch/${ARCH}/boot
+          # output artifacts path (if produced)
+          ls -l -h ${PWD}/arch/${ARCH}/boot || true
           echo "file_path=${PWD}/arch/${ARCH}/boot/${KERNEL_IMAGE_NAME}" >> $GITHUB_ENV
+
 
         
         
