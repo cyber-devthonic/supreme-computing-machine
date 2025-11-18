@@ -887,7 +887,6 @@ jobs:
           
        # ===================================================================  
        
-       # Build Kernel fixed avoid CC being polluted by flags
       - name: Build Kernel (fixed avoid CC being polluted by flags)
         working-directory: kernel
         env:
@@ -917,7 +916,7 @@ jobs:
           export HOSTCC=clang
           export HOSTCXX=clang++
 
-          # Export precise LLVM toolchain helpers (ensure these are the installed llvm-18 binaries)
+          # Export precise LLVM toolchain helpers
           export AR=llvm-ar
           export NM=llvm-nm
           export OBJCOPY=llvm-objcopy
@@ -929,17 +928,16 @@ jobs:
           echo "Using linker binary: $(which $LD) ($( $LD --version | head -n1 ))"
 
           # -------------------------------
-          # Pass flags directly on the make command line
-          # Use KCPPFLAGS for preprocessor flags (affects both C and assembly)
+          # Add -Wno-pointer-sign to suppress pointer signedness warnings
           # -------------------------------
-          MAKE_KCFLAGS="-Wno-error"
-          MAKE_KCPPFLAGS="-Wno-error"
-          MAKE_KBUILD_CFLAGS="-Wno-error"
+          MAKE_KCFLAGS="-Wno-error -Wno-pointer-sign"
+          MAKE_KCPPFLAGS="-Wno-error -Wno-pointer-sign"
+          MAKE_KBUILD_CFLAGS="-Wno-error -Wno-pointer-sign"
 
           echo "Building with KCFLAGS='$MAKE_KCFLAGS', KCPPFLAGS='$MAKE_KCPPFLAGS', KBUILD_CFLAGS='$MAKE_KBUILD_CFLAGS'"
 
           # ==========================================================
-          #  CLEAN (pass flags to make invocation; don't export them)
+          #  CLEAN
           # ==========================================================
           make LLVM=1 LLVM_IAS=1 \
               CC=$CC HOSTCC=$HOSTCC LD=$LD \
@@ -949,7 +947,7 @@ jobs:
               O=${PWD} mrproper
 
           # ==========================================================
-          #  DEFCONFIG (same: pass flags inline)
+          #  DEFCONFIG
           # ==========================================================
           make LLVM=1 LLVM_IAS=1 \
               CC=$CC HOSTCC=$HOSTCC LD=$LD \
@@ -962,9 +960,9 @@ jobs:
           scripts/config --file .config -e LTO_CLANG -d LTO_NONE -e LTO_CLANG_THIN -d LTO_CLANG_FULL -e THINLTO
 
           # ==========================================================
-          #  BUILD KERNEL (Werror disabled, pass flags IN-LINE)
+          #  BUILD KERNEL
           # ==========================================================
-          echo "🚀 Building kernel with LLVM and Werror disabled…"
+          echo "🚀 Building kernel with LLVM and warnings suppressed…"
 
           make LLVM=1 LLVM_IAS=1 \
               CC=$CC HOSTCC=$HOSTCC LD=$LD \
@@ -974,22 +972,25 @@ jobs:
               O=${PWD} -j$(nproc) \
               ${KERNEL_IMAGE_NAME} modules prepare-objtool 2>&1 | tee ../kernel_build.log
 
-          # output artifacts path (if produced)
+          # Verify build success and output artifacts path
+          BUILD_STATUS=$?
+          if [ $BUILD_STATUS -ne 0 ]; then
+            echo "❌ Kernel build failed with exit code $BUILD_STATUS"
+            exit $BUILD_STATUS
+          fi
+          
           ls -l -h ${PWD}/arch/${ARCH}/boot || true
           echo "file_path=${PWD}/arch/${ARCH}/boot/${KERNEL_IMAGE_NAME}" >> $GITHUB_ENV
 
+    # ===================================================================
 
-        
-        
-        # ===================================================================
-        
       - name: Show last 200 build lines on failure (diagnostic)
         if: failure()
         run: |
-            echo "==== KERNEL BUILD FAILED ===="
-            tail -n 200 kernel_build.log
-            
-        # ===================================================================
+          echo "==== KERNEL BUILD FAILED ===="
+          tail -n 200 kernel_build.log
+
+    # ===================================================================
 
       - name: Upload kernel-ARCVM-${{ matrix.arch }}-${{ env.version }}
         uses: actions/upload-artifact@v5
@@ -997,32 +998,41 @@ jobs:
           name: kernel-ARCVM-${{ matrix.arch }}-${{ env.version }}
           path: "${{ env.file_path }}"
 
-        # ===================================================================
-           
+    # ===================================================================
+
       - name: Patch bzImage for KPM
         if: ${{ inputs.use_kpm && inputs.kernelsu_variant == 'SukiSU' }}
         working-directory: kernel
         run: |
-          echo "[+] Patching bzImage for KPM support"
-          cd arch/x86/boot/
+            echo "[+] Patching bzImage for KPM support"
+            cd arch/${{ matrix.arch }}/boot/
 
-          curl -LSs "https://raw.githubusercontent.com/ShirkNeko/SukiSU_patch/refs/heads/main/kpm/patch_linux" -o patch
-          chmod 777 patch
-          ./patch || true
+            curl -LSs "https://raw.githubusercontent.com/ShirkNeko/SukiSU_patch/refs/heads/main/kpm/patch_linux" -o patch
+            chmod 777 patch
+            ./patch || true
 
-          if [ -f "obzImage" ]; then
-            rm -rf bzImage
-            mv obzImage bzImage
-            echo "[+] KPM patching completed"
-          fi
+            if [ -f "obzImage" ]; then
+              rm -rf bzImage
+              mv obzImage bzImage
+              echo "[+] KPM patching completed"
+            fi
 
-      # ===================================================================
-      
+    # ===================================================================
+
       - name: Create Simple Kernel Zip
         run: |
           echo "[+] Creating kernel package zip"
-          KERNEL_PATH="${{ github.workspace }}/kernel/arch/x86/boot/bzImage"
+          # Use the file_path from the build step (already has correct architecture path)
+          KERNEL_PATH="${{ env.file_path }}"
           ZIP_NAME="ARCVM-${{ env.version }}-${{ inputs.kernelsu_variant }}-${{ inputs.custom_version }}.zip"
+
+          # Verify kernel exists before packaging
+          if [ ! -f "$KERNEL_PATH" ]; then
+            echo "❌ ERROR: Kernel image not found at $KERNEL_PATH"
+            echo "Searching for bzImage..."
+            find ${{ github.workspace }}/kernel -name "bzImage" -o -name "${KERNEL_IMAGE_NAME}"
+            exit 1
+          fi
 
           mkdir kernel_package
           cp "$KERNEL_PATH" kernel_package/
@@ -1034,13 +1044,13 @@ jobs:
 
           zip -r "$ZIP_NAME" kernel_package/
           echo "kernel_zip=$ZIP_NAME" >> $GITHUB_ENV
-          
-     # ===================================================================
+
+    # ===================================================================
 
       - name: Upload Kernel Artifacts
         uses: actions/upload-artifact@v5
         with:
           name: ARCVM-KernelSU-SUSFS-${{ inputs.kernelsu_variant }}-${{ env.version }}
           path: |
-            ${{ env.file_path }}
-            ${{ env.kernel_zip }}
+              ${{ env.file_path }}
+              ${{ env.kernel_zip }}
