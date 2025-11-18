@@ -928,11 +928,11 @@ jobs:
           echo "Using linker binary: $(which $LD) ($( $LD --version | head -n1 ))"
 
           # -------------------------------
-          # Add -Wno-pointer-sign to suppress pointer signedness warnings
+          # Suppress ALL warnings that could be treated as errors
           # -------------------------------
-          MAKE_KCFLAGS="-Wno-error -Wno-pointer-sign"
-          MAKE_KCPPFLAGS="-Wno-error -Wno-pointer-sign"
-          MAKE_KBUILD_CFLAGS="-Wno-error -Wno-pointer-sign"
+          MAKE_KCFLAGS="-Wno-error -Wno-pointer-sign -Wno-address-of-packed-member -Wno-gnu-variable-sized-type-not-at-end"
+          MAKE_KCPPFLAGS="-Wno-error -Wno-pointer-sign -Wno-address-of-packed-member -Wno-gnu-variable-sized-type-not-at-end"
+          MAKE_KBUILD_CFLAGS="-Wno-error -Wno-pointer-sign -Wno-address-of-packed-member -Wno-gnu-variable-sized-type-not-at-end"
 
           echo "Building with KCFLAGS='$MAKE_KCFLAGS', KCPPFLAGS='$MAKE_KCPPFLAGS', KBUILD_CFLAGS='$MAKE_KBUILD_CFLAGS'"
 
@@ -958,11 +958,14 @@ jobs:
 
           # Apply LTO config
           scripts/config --file .config -e LTO_CLANG -d LTO_NONE -e LTO_CLANG_THIN -d LTO_CLANG_FULL -e THINLTO
+          
+          # Disable CONFIG_WERROR in the kernel config to prevent warnings from being errors
+          scripts/config --file .config -d WERROR || true
 
           # ==========================================================
           #  BUILD KERNEL
           # ==========================================================
-          echo "🚀 Building kernel with LLVM and warnings suppressed…"
+          echo "🚀 Building kernel with LLVM and all warnings suppressed…"
 
           make LLVM=1 LLVM_IAS=1 \
               CC=$CC HOSTCC=$HOSTCC LD=$LD \
