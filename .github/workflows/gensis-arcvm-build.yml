@@ -61,7 +61,7 @@ jobs:
     name: Build ChromeOS ARCVM kernel
     runs-on: ubuntu-22.04
     env:
-      LTO: thin
+      LTO: none
       ROOT_DIR: /
       KERNEL_DIR: ${{ github.workspace }}/kernel
       CCACHE_COMPILERCHECK: "%compiler% -dumpmachine; %compiler% -dumpversion"
@@ -956,16 +956,25 @@ jobs:
               DEPMOD=depmod DTC=dtc \
               O=${PWD} ${DEFCONFIG} < /dev/null
 
-          # Apply LTO config
-          scripts/config --file .config -e LTO_CLANG -d LTO_NONE -e LTO_CLANG_THIN -d LTO_CLANG_FULL -e THINLTO
+          # ==========================================================
+          # DISABLE LTO - ThinLTO is incompatible with LLVM 18 and this kernel
+          # ==========================================================
+          echo "⚠️ Disabling LTO due to LLVM 18 inline assembly incompatibility"
+          scripts/config --file .config -d LTO_CLANG -e LTO_NONE -d LTO_CLANG_THIN -d LTO_CLANG_FULL -d THINLTO
           
           # Disable CONFIG_WERROR in the kernel config to prevent warnings from being errors
           scripts/config --file .config -d WERROR || true
+          
+          # Run olddefconfig to resolve any config conflicts
+          make LLVM=1 LLVM_IAS=1 \
+              CC=$CC HOSTCC=$HOSTCC LD=$LD \
+              KCFLAGS="$MAKE_KCFLAGS" KCPPFLAGS="$MAKE_KCPPFLAGS" KBUILD_CFLAGS="$MAKE_KBUILD_CFLAGS" \
+              O=${PWD} olddefconfig
 
           # ==========================================================
           #  BUILD KERNEL
           # ==========================================================
-          echo "🚀 Building kernel with LLVM and all warnings suppressed…"
+          echo "🚀 Building kernel with LLVM (LTO disabled) and all warnings suppressed…"
 
           make LLVM=1 LLVM_IAS=1 \
               CC=$CC HOSTCC=$HOSTCC LD=$LD \
